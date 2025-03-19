@@ -19,7 +19,7 @@ U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, 15, 4, 16);
 // Configurazione ADC e I2S
 #define BUFFER_SIZE 10000
 uint16_t adc_buffer[BUFFER_SIZE];
-#define ADC_CHANNEL ADC1_CHANNEL_3  // Per GPIO39  (ESP32, sarebbe GPIO$ per ESP32-S3), modifica se usi un altro pin
+#define ADC_CHANNEL ADC1_CHANNEL_3  // Per GPIO39, modifica se usi un altro pin
 uint16_t max_adc = 0;  // Per memorizzare il valore massimo ADC da visualizzare
 
 void u8g2_prepare(void) {
@@ -65,25 +65,25 @@ void setup(void) {
 
   // Configurazione I2S per il campionamento ADC
   i2s_config_t i2s_config = {
-      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),  // Master mode, receive only
-      .sample_rate = 134200,                                // Sampling frequency
+      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN),  // Master mode, receive only
+      .sample_rate = 134200,                                // Frequenza di campionamento
       .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,         // 16-bit samples
-      .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,          // Single channel (left)
-      .communication_format = I2S_COMM_FORMAT_STAND_I2S,    // Updated format
-      .intr_alloc_flags = 0,                                // No interrupt flags
-      .dma_buf_count = 8,                                   // Number of DMA buffers
-      .dma_buf_len = 64,                                    // Length of each buffer
+      .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,          // Solo canale sinistro
+      .communication_format = I2S_COMM_FORMAT_STAND_I2S,    // Formato I2S standard
+      .intr_alloc_flags = 0,                                // Nessun flag di interrupt
+      .dma_buf_count = 8,                                   // Numero di buffer DMA
+      .dma_buf_len = 64,                                    // Lunghezza di ogni buffer
       .use_apll = false,                                    // No APLL clock
-      .tx_desc_auto_clear = false,                          // No auto-clear for TX
-      .fixed_mclk = 0                                       // Default MCLK
+      .tx_desc_auto_clear = false,                          // No auto-clear per TX
+      .fixed_mclk = 0                                       // MCLK di default
   };
 
-  // Install I2S driver
+  // Installa il driver I2S
   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
 
-  // Configure ADC for I2S
-  i2s_set_adc_mode(ADC_UNIT_1, ADC_CHANNEL);  // Use ADC1 and the specified channel
-  i2s_adc_enable(I2S_NUM_0);                  // Enable ADC sampling
+  // Configura ADC per I2S su GPIO39
+  i2s_set_adc_mode(ADC_UNIT_1, ADC_CHANNEL);
+  i2s_adc_enable(I2S_NUM_0);
 }
 
 void loop(void) {
@@ -111,6 +111,8 @@ void loop(void) {
     size_t bytes_read;
     i2s_read(I2S_NUM_0, adc_buffer, BUFFER_SIZE * 2, &bytes_read, 80 / portTICK_PERIOD_MS);
     i2s_stop(I2S_NUM_0);
+    Serial.print("ADC Value: ");
+    Serial.println(adc_buffer[0]);
     if (bytes_read == BUFFER_SIZE * 2) {
       // Elaborazione del buffer, ad esempio trovare il valore massimo
       max_adc = 0;
