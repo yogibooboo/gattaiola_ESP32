@@ -8,19 +8,21 @@
 
 int32_t frequenza = 134200;
 int statoconta = 0;
+int statoacq=0;
 
 U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, 15, 4, 16);
 
 #define pblack 12
 #define pred 14
 #define pyellow 27
+#define pblue 22
 #define ledverde 21
 
 // Configurazione ADC e I2S
 #define BUFFER_SIZE 10000
 uint16_t adc_buffer[BUFFER_SIZE];
 #define ADC_CHANNEL ADC1_CHANNEL_3  // Per GPIO39, modifica se usi un altro pin
-uint16_t max_adc = 0;  // Per memorizzare il valore massimo ADC da visualizzare
+uint16_t first_adc = 0;  // Per memorizzare il primo valore ADC da visualizzare
 
 void u8g2_prepare(void) {
   u8g2.setFont(u8g2_font_10x20_tf);
@@ -41,9 +43,9 @@ void u8g2_prova() {
   else
     u8g2.drawStr(0, 40, "STOP");
 
-  // Visualizzazione del risultato del campionamento (esempio: valore massimo)
+  // Visualizzazione del primo valore ADC invece del massimo
   char adc_buf[10];
-  sprintf(adc_buf, "Max: %d", max_adc);
+  sprintf(adc_buf, "ADC: %d", first_adc);
   u8g2.drawStr(0, 20, adc_buf);
 }
 
@@ -56,6 +58,7 @@ void setup(void) {
   pinMode(pblack, INPUT_PULLUP);
   pinMode(pred, INPUT_PULLUP);
   pinMode(pyellow, INPUT_PULLUP);
+  pinMode(pblue, INPUT_PULLUP);
   pinMode(ledverde, OUTPUT);
   Serial.begin(115200);
   ledcSetup(PWM_CHANNEL, frequenza, 4);
@@ -90,8 +93,10 @@ void loop(void) {
   int sblack = digitalRead(pblack);
   int sred = digitalRead(pred);
   int syel = digitalRead(pyellow);
+  int sblue = digitalRead(pblue);
 
   if (syel == 0) statoconta ^= 1;
+  if (sblue == 0) statoacq ^= 1;
 
   digitalWrite(ledverde, syel ^ 1);
 
@@ -106,7 +111,7 @@ void loop(void) {
   ledcSetup(PWM_CHANNEL, frequenza, 4);
 
   // Campionamento ADC quando statoconta == 1
-  if (statoconta == 1) {
+  if (statoacq == 1) {
     i2s_start(I2S_NUM_0);
     size_t bytes_read;
     i2s_read(I2S_NUM_0, adc_buffer, BUFFER_SIZE * 2, &bytes_read, 80 / portTICK_PERIOD_MS);
@@ -114,12 +119,8 @@ void loop(void) {
     Serial.print("ADC Value: ");
     Serial.println(adc_buffer[0]);
     if (bytes_read == BUFFER_SIZE * 2) {
-      // Elaborazione del buffer, ad esempio trovare il valore massimo
-      max_adc = 0;
-      for (int i = 0; i < BUFFER_SIZE; i++) {
-        uint16_t val = adc_buffer[i] >> 4;  // Correzione per ADC a 12 bit in campioni a 16 bit
-        if (val > max_adc) max_adc = val;
-      }
+      // Usa il primo valore del buffer invece del massimo
+      first_adc = adc_buffer[0] >> 4;  // Correzione per ADC a 12 bit in campioni a 16 bit
     }
   }
 
