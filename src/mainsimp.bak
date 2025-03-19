@@ -1,0 +1,56 @@
+#include <Arduino.h>
+#include <driver/i2s.h>
+#include <driver/adc.h>
+#include <U8g2lib.h>
+
+#define PWM_PIN 13       // Pin di output PWM
+#define PWM_CHANNEL 0    // Canale PWM usato
+int32_t frequenza=134200;
+int statoconta=0;
+#define pblack 12
+#define pred 14
+#define pyellow 27
+#define ledverde 21
+
+void setup() {
+    pinMode(pblack, INPUT_PULLUP);
+    pinMode(pred, INPUT_PULLUP);
+    pinMode(pyellow, INPUT_PULLUP);
+    pinMode(ledverde, OUTPUT); 
+  
+    Serial.begin(115200);
+    
+
+  
+}
+
+void loop() {
+
+
+    int sblack = digitalRead(pblack); // Legge lo stato del pin
+    int sred = digitalRead(pred);
+    int syel = digitalRead(pyellow);
+
+    if (syel==0) statoconta^=1;
+
+    Serial.print(sblack); 
+    Serial.print(sred); 
+    Serial.print(syel); 
+    Serial.println(statoconta); 
+    digitalWrite(ledverde, syel^1);
+
+  if(statoconta==1){
+    frequenza+=1000;
+    if(frequenza>150000) frequenza-=49000;
+  } 
+  if (sblack==0) frequenza+=200;
+  if (sred==0) frequenza-=200;
+  if ((sblack==0)&&(sred==0)) frequenza=134200;
+  
+  //frequenza=134200;
+  ledcSetup(PWM_CHANNEL, frequenza, 4); // Frequenza 1 Hz, risoluzione 4 bit
+  Serial.print("frequenza: ");
+  Serial.print(frequenza);
+
+    delay(100);
+}
