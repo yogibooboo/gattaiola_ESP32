@@ -1,21 +1,24 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ESP32 WebSocket Client</title>
+  <title>ESP32 Websocket Client</title>
 </head>
 <body>
   <button onclick="requestBuffer()">Richiedi Buffer</button>
   <p id="status">Stato: Non connesso</p>
 
   <script>
-    const ws = new WebSocket("ws://192.168.1.25/ws");  // Sostituisci con l’IP dell’ESP32
+    const ws = new WebSocket("ws://192.168.1.104/ws");  // Sostituisci con l’IP dell’ESP32
     const status = document.getElementById("status");
 
     ws.onopen = function() {
       status.textContent = "Stato: Connesso";
     };
 
-    ws.onmessage = function(event) {
+  ws.onmessage = function(event) {
+    console.log("Messaggio ricevuto, tipo:", event.data.constructor.name);
+    if (event.data instanceof Blob) {
+      console.log("Dimensione Blob:", event.data.size);
       const blob = event.data;
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -23,8 +26,11 @@
       a.download = "adc_buffer.bin";
       a.click();
       window.URL.revokeObjectURL(url);
-      status.textContent = "Stato: Buffer ricevuto e scaricato";
-    };
+      document.getElementById("status").textContent = "Stato: Buffer ricevuto e scaricato";
+    } else {
+      console.log("Dati ricevuti non sono un Blob:", event.data);
+    }
+  };
 
     ws.onclose = function() {
       status.textContent = "Stato: Disconnesso";
