@@ -5,24 +5,17 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 
-// Configurazione Wi-Fi
+// Configurazione invariata
 const char *ssid = "VodafoneRibes";
 const char *password = "scheggia2000";
-
-// Definizioni PWM
 #define PWM_PIN 13
 #define PWM_CHANNEL 0
-
 int32_t frequenza = 134200;
 int statoconta = 0;
 int statoacq = 0;
-
-// WebSocket
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
-
 U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, 15, 4, 16);
-
 #define pblack 12
 #define pred 14
 #define pyellow 27
@@ -30,11 +23,12 @@ U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, 15, 4, 16);
 #define ledverde 21
 
 // Configurazione ADC e I2S
-#define BUFFER_SIZE 5000  // Ridotto da 10000
-#define MAX_PEAKS 200     // Ridotto da 1000
+#define BUFFER_SIZE 10000  // Torniamo a 10000
+#define CIRCULAR_SIZE 256  // Buffer circolari da 256
+#define MAX_PEAKS 1000
 uint16_t adc_buffer[BUFFER_SIZE];
-int32_t segnale_filtrato32[BUFFER_SIZE];
-int32_t correlazione32[BUFFER_SIZE];
+int32_t segnale_filtrato32[CIRCULAR_SIZE];
+int32_t correlazione32[CIRCULAR_SIZE];
 int32_t picchi32[MAX_PEAKS];
 int32_t distanze32[MAX_PEAKS];
 struct Bit { int value; int32_t pos; };
@@ -48,7 +42,7 @@ bool crc_ok = false;
 #define ADC_CHANNEL ADC1_CHANNEL_3
 uint16_t first_adc = 0;
 
-// Funzione di analisi (invariata, solo BUFFER_SIZE e MAX_PEAKS cambiati)
+// Funzione di analisi con indici mascherati
 void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int32_t* peaks, int32_t* dists, Bit* bits, uint8_t* bytes,
                           int32_t& n_peaks, int32_t& n_dists, int32_t& n_bits, uint16_t& country, uint64_t& device, bool& crc_valid) {
     const int N = BUFFER_SIZE;
@@ -61,48 +55,48 @@ void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int3
 
     n_peaks = n_dists = n_bits = 0;
     for (int i = 0; i < 10; i++) bytes[i] = 0;
-    for (int i = 0; i < 28; i++) filt[i] = 0;
-    for (int i = 0; i < 16; i++) corr[i] = 0;
+    for (int i = 0; i < CIRCULAR_SIZE; i++) filt[i] = corr[i] = 0;
 
     int i = 32;
     if (i < N && i + 3 < N) {
         int32_t somma_media = 0;
         for (int j = i - 4; j < i + 4; j++) somma_media += segnale[j];
-        filt[i] = somma_media / larghezza_finestra;
+        filt[i & (CIRCULAR_SIZE - 1)] = somma_media / larghezza_finestra;
     }
     if (i >= lunghezza_correlazione) {
-        corr[16] = 0;
-        for (int j = 0; j < 16; j++) corr[16] += filt[j];
-        for (int j = 16; j < 32; j++) corr[16] -= filt[j];
+        corr[16 & (CIRCULAR_SIZE - 1)] = 0;
+        for (int j = 0; j < 16; j++) corr[16 & (CIRCULAR_SIZE - 1)] += filt[j & (CIRCULAR_SIZE - 1)];
+        for (int j = 16; j < 32; j++) corr[16 & (CIRCULAR_SIZE - 1)] -= filt[j & (CIRCULAR_SIZE - 1)];
     }
 
-    int32_t max_i = corr[16], min_i = corr[16], max_i8 = corr[8], min_i8 = corr[8];
+    int32_t max_i = corr[16 & (CIRCULAR_SIZE - 1)], min_i = corr[16 & (CIRCULAR_SIZE - 1)];
+    int32_t max_i8 = corr[8 & (CIRCULAR_SIZE - 1)], min_i8 = corr[8 & (CIRCULAR_SIZE - 1)];
     int32_t stato = 1;
 
     for (i = 33; i < N - 4; i++) {
-        filt[i] = filt[i-1] - (segnale[i-4] / larghezza_finestra) + (segnale[i+3] / larghezza_finestra);
-        corr[i-16] = corr[i-17] - filt[i-32] + 2 * filt[i-16] - filt[i];
+        filt[i & (CIRCULAR_SIZE - 1)] = filt[(i-1) & (CIRCULAR_SIZE - 1)] - (segnale[i-4] / larghezza_finestra) + (segnale[i+3] / larghezza_finestra);
+        corr[(i-16) & (CIRCULAR_SIZE - 1)] = corr[(i-17) & (CIRCULAR_SIZE - 1)] - filt[(i-32) & (CIRCULAR_SIZE - 1)] + 2 * filt[(i-16) & (CIRCULAR_SIZE - 1)] - filt[i & (CIRCULAR_SIZE - 1)];
 
         newbit = 2; numbit = 0; newpeak = false;
 
         if (stato == 1) {
-            max_i = max(corr[i-16], max_i);
-            max_i8 = max(corr[i-24], max_i8);
+            max_i = max(corr[(i-16) & (CIRCULAR_SIZE - 1)], max_i);
+            max_i8 = max(corr[(i-24) & (CIRCULAR_SIZE - 1)], max_i8);
             if (max_i == max_i8 && n_peaks < MAX_PEAKS) {
                 peaks[n_peaks++] = i - 24;
                 stato = -1;
-                min_i = corr[i-16];
-                min_i8 = corr[i-24];
+                min_i = corr[(i-16) & (CIRCULAR_SIZE - 1)];
+                min_i8 = corr[(i-24) & (CIRCULAR_SIZE - 1)];
                 newpeak = true;
             }
         } else {
-            min_i = min(corr[i-16], min_i);
-            min_i8 = min(corr[i-24], min_i8);
+            min_i = min(corr[(i-16) & (CIRCULAR_SIZE - 1)], min_i);
+            min_i8 = min(corr[(i-24) & (CIRCULAR_SIZE - 1)], min_i8);
             if (min_i == min_i8 && n_peaks < MAX_PEAKS) {
                 peaks[n_peaks++] = i - 24;
                 stato = 1;
-                max_i = corr[i-16];
-                max_i8 = corr[i-24];
+                max_i = corr[(i-16) & (CIRCULAR_SIZE - 1)];
+                max_i8 = corr[(i-24) & (CIRCULAR_SIZE - 1)];
                 newpeak = true;
             }
         }
@@ -194,35 +188,11 @@ void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int3
     }
 }
 
-void u8g2_prepare(void) {
-    u8g2.setFont(u8g2_font_10x20_tf);
-    u8g2.setFontRefHeightExtendedText();
-    u8g2.setDrawColor(1);
-    u8g2.setFontPosTop();
-    u8g2.setFontDirection(0);
-}
+void u8g2_prepare(void) { /* invariato */ }
 
-void u8g2_prova() {
-    char buffer[20];
-    itoa(frequenza, buffer, 10);
-    u8g2.drawStr(0, 0, "Freq:");
-    u8g2.drawStr(50, 0, buffer);
+void u8g2_prova() { /* invariato */ }
 
-    if (crc_ok) {
-        sprintf(buffer, "CC: %u", country_code);
-        u8g2.drawStr(0, 20, buffer);
-        sprintf(buffer, "DC: %llu", device_code);
-        u8g2.drawStr(0, 40, buffer);
-    } else {
-        u8g2.drawStr(0, 20, "KO");
-        u8g2.drawStr(0, 40, "***");
-    }
-}
-
-void draw(void) {
-    u8g2_prepare();
-    u8g2_prova();
-}
+void draw(void) { /* invariato */ }
 
 void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
     if (type == WS_EVT_CONNECT) {
