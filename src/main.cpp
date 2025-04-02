@@ -22,9 +22,8 @@ U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, 15, 4, 16);
 #define pblue 22
 #define ledverde 21
 
-// Configurazione ADC e I2S
-#define BUFFER_SIZE 10000  // Torniamo a 10000
-#define CIRCULAR_SIZE 256  // Buffer circolari da 256
+#define BUFFER_SIZE 10000
+#define CIRCULAR_SIZE 256
 #define MAX_PEAKS 1000
 uint16_t adc_buffer[BUFFER_SIZE];
 int32_t segnale_filtrato32[CIRCULAR_SIZE];
@@ -42,7 +41,6 @@ bool crc_ok = false;
 #define ADC_CHANNEL ADC1_CHANNEL_3
 uint16_t first_adc = 0;
 
-// Funzione di analisi con indici mascherati
 void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int32_t* peaks, int32_t* dists, Bit* bits, uint8_t* bytes,
                           int32_t& n_peaks, int32_t& n_dists, int32_t& n_bits, uint16_t& country, uint64_t& device, bool& crc_valid) {
     const int N = BUFFER_SIZE;
@@ -52,6 +50,9 @@ void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int3
     int32_t stato_decodifica = 0, contatore_zeri = 0, contatore_bytes = 0, contatore_bits = 0, stato_decobytes = 0;
     int32_t ultima_distanza = 0, newbit = 0, numbit = 0;
     bool newpeak = false;
+
+    digitalWrite(ledverde, HIGH);
+    uint32_t start_time = millis();
 
     n_peaks = n_dists = n_bits = 0;
     for (int i = 0; i < 10; i++) bytes[i] = 0;
@@ -136,7 +137,8 @@ void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int3
                         stato_decobytes = 1;
                         contatore_bytes = contatore_bits = 0;
                         for (int j = 0; j < 10; j++) bytes[j] = 0;
-                        Serial.printf("Sequenza sync at: %d\n", i);
+                        Serial.print("Sequenza sync at: ");
+                        Serial.println(i);
                     } else contatore_zeri = 0;
                     break;
 
@@ -150,7 +152,11 @@ void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int3
                         contatore_bits = 0;
                         if (contatore_bytes >= 10) {
                             Serial.print("Byte estratti: [");
-                            for (int j = 0; j < 10; j++) Serial.printf("%02X%s", bytes[j], j < 9 ? ", " : "]\n");
+                            for (int j = 0; j < 10; j++) {
+                                Serial.print(bytes[j], HEX);
+                                if (j < 9) Serial.print(", ");
+                                else Serial.println("]");
+                            }
                             contatore_zeri = contatore_bytes = 0;
                             stato_decobytes = 0;
 
@@ -167,17 +173,21 @@ void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int3
                                 }
                             }
                             crc_valid = (crc == 0);
-                            Serial.printf("CRC: %s\n", crc_valid ? "OK" : "KO");
+                            Serial.print("CRC: ");
+                            Serial.println(crc_valid ? "OK" : "KO");
                             if (crc_valid) {
                                 country = (bytes[5] << 2) | (bytes[4] >> 6);
                                 device = ((uint64_t)(bytes[4] & 0x3F) << 32) | ((uint64_t)bytes[3] << 24) |
                                          ((uint64_t)bytes[2] << 16) | (bytes[1] << 8) | bytes[0];
-                                Serial.printf("Country Code: %u\n", country);
-                                Serial.printf("Device Code: %llu\n", device);
+                                Serial.print("Country Code: ");
+                                Serial.println(country);
+                                Serial.print("Device Code: ");
+                                Serial.println((uint64_t)device);  // Cast per evitare problemi di formato
                             }
                         }
                     } else {
-                        Serial.printf("Perso sync at: %d\n", i);
+                        Serial.print("Perso sync at: ");
+                        Serial.println(i);
                         contatore_zeri = contatore_bits = contatore_bytes = 0;
                         stato_decobytes = 0;
                     }
@@ -186,13 +196,43 @@ void media_correlazione_32(uint16_t* segnale, int32_t* filt, int32_t* corr, int3
             numbit--;
         }
     }
+
+    digitalWrite(ledverde, LOW);
+    uint32_t end_time = millis();
+    Serial.print("Durata analisi: ");
+    Serial.print(end_time - start_time);
+    Serial.println(" ms");
 }
 
-void u8g2_prepare(void) { /* invariato */ }
+void u8g2_prepare(void) {
+    u8g2.setFont(u8g2_font_10x20_tf);
+    u8g2.setFontRefHeightExtendedText();
+    u8g2.setDrawColor(1);
+    u8g2.setFontPosTop();
+    u8g2.setFontDirection(0);
+}
 
-void u8g2_prova() { /* invariato */ }
+void u8g2_prova() {
+    char buffer[20];
+    itoa(frequenza, buffer, 10);
+    u8g2.drawStr(0, 0, "Freq:");
+    u8g2.drawStr(50, 0, buffer);
 
-void draw(void) { /* invariato */ }
+    if (crc_ok) {
+        sprintf(buffer, "CC: %u", country_code);
+        u8g2.drawStr(0, 20, buffer);
+        sprintf(buffer, "%llu", device_code);  // Solo il device_code, senza "DC: "
+        u8g2.drawStr(0, 40, buffer);
+    } else {
+        u8g2.drawStr(0, 20, "KO");
+        u8g2.drawStr(0, 40, "***");
+    }
+}
+
+void draw(void) {
+    u8g2_prepare();
+    u8g2_prova();
+}
 
 void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
     if (type == WS_EVT_CONNECT) {
@@ -245,6 +285,8 @@ void setup(void) {
     ledcAttachPin(PWM_PIN, PWM_CHANNEL);
     ledcWrite(PWM_CHANNEL, 8);
     u8g2.begin();
+    u8g2.clearBuffer();
+    u8g2.sendBuffer();
 
     i2s_config_t i2s_config = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN),
@@ -274,8 +316,6 @@ void loop(void) {
     if (syel == 0) statoconta ^= 1;
     if (sblue == 0) statoacq ^= 1;
 
-    digitalWrite(ledverde, syel ^ 1);
-
     if (statoconta == 1) {
         frequenza += 1000;
         if (frequenza > 150000) frequenza -= 49000;
@@ -283,8 +323,6 @@ void loop(void) {
     if (sblack == 0) frequenza += 200;
     if (sred == 0) frequenza -= 200;
     if ((sblack == 0) && (sred == 0)) frequenza = 134200;
-
-    ledcSetup(PWM_CHANNEL, frequenza, 4);
 
     if (statoacq == 1) {
         i2s_start(I2S_NUM_0);
@@ -295,7 +333,10 @@ void loop(void) {
         Serial.println(adc_buffer[0]);
         if (bytes_read == BUFFER_SIZE * 2) {
             first_adc = adc_buffer[0] >> 4;
+            media_correlazione_32(adc_buffer, segnale_filtrato32, correlazione32, picchi32, distanze32, bits32, bytes32,
+                                 num_picchi, num_distanze, num_bits, country_code, device_code, crc_ok);
         }
+        //statoacq = 0;  // Resetta dopo acquisizione e analisi
     }
 
     u8g2.clearBuffer();
